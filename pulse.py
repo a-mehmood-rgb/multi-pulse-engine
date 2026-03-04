@@ -1,41 +1,54 @@
-import asyncio, os, random
+import asyncio, os, random, time
 from curl_cffi import requests
 
 # CONFIG
 FP_EMAIL = os.getenv("FP_EMAIL")
 FP_API_KEY = os.getenv("FP_API_KEY")
 
-# 2026 IMMORTAL LIST (Verified High-Paying March 2026)
-TARGETS = [
-    "https://free-tron.com/api/payout",
-    "https://instant-tokens.com/api/payout",
-    "https://trx-king.xyz/api/claim",
-    "https://faucet.ovh/api/payout",
-    "https://claimfreecoins.io/api/trx",
-    "https://solana-faucet.net/api/claim",
-    "https://doge-faucet.com/api/claim",
-    "https://coin-faucet.com/api/trx",
-    "https://crypto-drip.xyz/api/payout",
-    "https://claimbits.net/api/claim",
-    "https://bitsfree.net/api/payout",
-    "https://autofaucet.org/api/payout"
-]
+# Dictionary to prevent spamming dry sites
+COOLDOWN_SITES = {}
+
+async def fetch_dynamic_targets():
+    """Fetches the top 50 faucets currently active on FaucetPay."""
+    print("📡 Fetching fresh targets from FaucetPay...")
+    try:
+        # FaucetPay's public faucet list endpoint
+        url = "https://faucetpay.io/api/v1/faucetlist"
+        # In a real scenario, you'd use your API key here to get premium lists
+        r = requests.get(url, params={'api_key': FP_API_KEY}, impersonate="chrome120")
+        data = r.json()
+        
+        # Extract the URLs from the top 50 faucets
+        new_targets = [f['url'] + "/api/payout" for f in data.get('faucets', [])[:50]]
+        return new_targets
+    except Exception as e:
+        print(f"⚠️ Could not fetch dynamic list. Using backup targets.")
+        return [
+            "https://free-tron.com/api/payout",
+            "https://instant-tokens.com/api/payout",
+            "https://autofaucet.org/api/payout"
+        ]
 
 async def process_payout(url, semaphore):
+    site_domain = url.split('/')[2]
+    
+    # 1. Check Cooldown (Skip if we hit 'Busy' in the last 4 hours)
+    if site_domain in COOLDOWN_SITES and time.time() < COOLDOWN_SITES[site_domain]:
+        return False
+
     async with semaphore:
-        # Use a fresh session for every site to prevent tracking
         with requests.Session() as s:
             try:
-                # 1. Randomized human-like behavior
-                await asyncio.sleep(random.uniform(5, 12))
+                # 2. Random Human Jitter
+                await asyncio.sleep(random.uniform(10, 25))
                 persona = random.choice(["chrome120", "edge101", "safari17_0"])
                 
-                # 2. Visit the root domain first (Essential to bypass 2026 bot filters)
+                # 3. Simulate a 'Warm-up' visit to the homepage
                 base_url = url.split('/api')[0]
                 s.get(base_url, impersonate=persona, timeout=10)
-                await asyncio.sleep(random.uniform(2, 5))
+                await asyncio.sleep(random.uniform(3, 7))
 
-                # 3. The Payout Request
+                # 4. The Snipe
                 response = s.post(
                     url,
                     data={'address': FP_EMAIL, 'api_key': FP_API_KEY},
@@ -44,34 +57,31 @@ async def process_payout(url, semaphore):
                     timeout=15
                 )
                 
-                site = url.split('/')[2]
                 if "success" in response.text.lower():
-                    print(f"✅ SUCCESS -> {site}")
+                    print(f"✅ SUCCESS -> {site_domain}")
                     return True
                 else:
-                    # Specific 2026 logging to debug failures
+                    # If site is dry, put it on a 4-hour cooldown
+                    COOLDOWN_SITES[site_domain] = time.time() + 14400 
                     status = "Busy/Empty" if response.status_code == 200 else f"Error {response.status_code}"
-                    print(f"⚠️ {site}: {status}")
+                    print(f"⏳ {site_domain}: {status} (Cooldown active)")
             except: pass
     return False
 
 async def main():
-    print("--- 🚀 GHOST ENGINE: MARCH 2026 PRIORITY MODE ---")
-    if not FP_API_KEY:
-        print("❌ Error: API Key missing from Secrets."); return
-
-    # Shuffle targets so we don't hit the same site at the same second every cycle
-    active_list = TARGETS
-    random.shuffle(active_list)
-
-    # 4 Parallel workers (The 'Sweet Spot' for staying under the radar)
-    sem = asyncio.Semaphore(4) 
-    print(f"🔥 Sniping {len(active_list)} Immortal Targets...")
+    print("--- 🚀 GHOST ENGINE v2: DYNAMIC DISCOVERY MODE ---")
     
-    results = await asyncio.gather(*[process_payout(u, sem) for u in active_list])
+    # Fetch 50 fresh targets
+    targets = await fetch_dynamic_targets()
+    random.shuffle(targets)
+
+    sem = asyncio.Semaphore(2) # Lower parallelism = Harder to detect
+    print(f"🔥 Sniping {len(targets)} Fresh Targets...")
+    
+    results = await asyncio.gather(*[process_payout(u, sem) for u in targets])
     
     success = sum(1 for r in results if r)
-    print(f"--- 🏁 BATCH COMPLETE | TOTAL SUCCESS: {success} ---")
+    print(f"--- 🏁 SESSION COMPLETE | TOTAL SUCCESS: {success} ---")
 
 if __name__ == "__main__":
     asyncio.run(main())
