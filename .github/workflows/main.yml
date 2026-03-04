@@ -1,37 +1,26 @@
-name: Multi-Grid-Pulse-2026
-
+name: Ghost Engine Payout
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Runs every 15 minutes
-  workflow_dispatch:       # Manual trigger button
+    - cron: '*/35 * * * *' # Runs every 35 minutes for stealth
+  workflow_dispatch:      # Allows you to click "Run" manually
 
 jobs:
-  pulse:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false      # Keeps Windows running even if Ubuntu fails
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    
+  build:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
-      - name: Install Stealth Tools
-        # We use a universal Python command so Windows doesn't get confused by Linux syntax
-        run: |
-          python -m pip install --upgrade pip
-          pip install curl_cffi
-          python -c "import os; os.system('pip install -r requirements.txt') if os.path.exists('requirements.txt') else print('No requirements file found, skipping...')"
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
 
-      - name: Run Engine
+      - name: Execute Ghost Engine
         env:
           FP_EMAIL: ${{ secrets.FP_EMAIL }}
           FP_API_KEY: ${{ secrets.FP_API_KEY }}
-        # '-u' ensures you see the '✅ Success' logs immediately
-        run: python -u pulse.py
+        run: python pulse.py
