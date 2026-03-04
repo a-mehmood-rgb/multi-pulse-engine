@@ -1,87 +1,90 @@
 import asyncio, os, random, time
 from curl_cffi import requests
+from playwright.async_api import async_playwright
 
 # CONFIG
 FP_EMAIL = os.getenv("FP_EMAIL")
 FP_API_KEY = os.getenv("FP_API_KEY")
-
-# Dictionary to prevent spamming dry sites
 COOLDOWN_SITES = {}
 
-async def fetch_dynamic_targets():
-    """Fetches the top 50 faucets currently active on FaucetPay."""
-    print("📡 Fetching fresh targets from FaucetPay...")
-    try:
-        # FaucetPay's public faucet list endpoint
-        url = "https://faucetpay.io/api/v1/faucetlist"
-        # In a real scenario, you'd use your API key here to get premium lists
-        r = requests.get(url, params={'api_key': FP_API_KEY}, impersonate="chrome120")
-        data = r.json()
+async def scrape_faucetpay_list():
+    """Bypasses API blocks by scraping the FaucetPay website directly."""
+    print("🕵️  Scraping FaucetPay for fresh targets...")
+    targets = []
+    async with async_playwright() as p:
+        # Launch stealth browser
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0")
+        page = await context.new_page()
         
-        # Extract the URLs from the top 50 faucets
-        new_targets = [f['url'] + "/api/payout" for f in data.get('faucets', [])[:50]]
-        return new_targets
-    except Exception as e:
-        print(f"⚠️ Could not fetch dynamic list. Using backup targets.")
-        return [
-            "https://free-tron.com/api/payout",
-            "https://instant-tokens.com/api/payout",
-            "https://autofaucet.org/api/payout"
-        ]
+        try:
+            # Navigate to the Tron Faucet List (Highest payout in March 2026)
+            await page.goto("https://faucetpay.io/faucetlist/tron", timeout=60000)
+            await page.wait_for_selector("table", timeout=10000)
+            
+            # Grab top 15 'Visit' buttons
+            links = await page.locator("a.btn-visit").element_handles()
+            for link in links[:15]:
+                href = await link.get_attribute("href")
+                if href:
+                    # Clean the URL and add the common API path
+                    clean_url = href.split('?')[0].rstrip('/') + "/api/payout"
+                    targets.append(clean_url)
+        except Exception as e:
+            print(f"⚠️ Scraper failed: {e}")
+        
+        await browser.close()
+    
+    # Backup if scraping fails
+    return targets if targets else ["https://free-tron.com/api/payout", "https://instant-tokens.com/api/payout"]
 
 async def process_payout(url, semaphore):
     site_domain = url.split('/')[2]
-    
-    # 1. Check Cooldown (Skip if we hit 'Busy' in the last 4 hours)
     if site_domain in COOLDOWN_SITES and time.time() < COOLDOWN_SITES[site_domain]:
         return False
 
     async with semaphore:
         with requests.Session() as s:
             try:
-                # 2. Random Human Jitter
-                await asyncio.sleep(random.uniform(10, 25))
-                persona = random.choice(["chrome120", "edge101", "safari17_0"])
+                await asyncio.sleep(random.uniform(5, 10))
+                persona = random.choice(["chrome120", "edge101"])
                 
-                # 3. Simulate a 'Warm-up' visit to the homepage
+                # Warm up
                 base_url = url.split('/api')[0]
                 s.get(base_url, impersonate=persona, timeout=10)
-                await asyncio.sleep(random.uniform(3, 7))
-
-                # 4. The Snipe
+                
+                # The Snipe
                 response = s.post(
                     url,
                     data={'address': FP_EMAIL, 'api_key': FP_API_KEY},
                     headers={"Referer": base_url, "X-Requested-With": "XMLHttpRequest"},
-                    impersonate=persona, 
-                    timeout=15
+                    impersonate=persona, timeout=15
                 )
                 
                 if "success" in response.text.lower():
                     print(f"✅ SUCCESS -> {site_domain}")
                     return True
                 else:
-                    # If site is dry, put it on a 4-hour cooldown
-                    COOLDOWN_SITES[site_domain] = time.time() + 14400 
-                    status = "Busy/Empty" if response.status_code == 200 else f"Error {response.status_code}"
-                    print(f"⏳ {site_domain}: {status} (Cooldown active)")
+                    COOLDOWN_SITES[site_domain] = time.time() + 7200 # 2 hour cool
+                    print(f"⏳ {site_domain}: Busy/Empty")
             except: pass
     return False
 
 async def main():
-    print("--- 🚀 GHOST ENGINE v2: DYNAMIC DISCOVERY MODE ---")
-    
-    # Fetch 50 fresh targets
-    targets = await fetch_dynamic_targets()
+    print("--- 🚀 GHOST ENGINE v3: SCRAPER MODE ---")
+    if not FP_API_KEY:
+        print("❌ Error: API Key missing."); return
+
+    # Get fresh targets via Playwright
+    targets = await scrape_faucetpay_list()
     random.shuffle(targets)
 
-    sem = asyncio.Semaphore(2) # Lower parallelism = Harder to detect
-    print(f"🔥 Sniping {len(targets)} Fresh Targets...")
-    
+    sem = asyncio.Semaphore(3)
+    print(f"🔥 Sniping {len(targets)} Targets...")
     results = await asyncio.gather(*[process_payout(u, sem) for u in targets])
     
     success = sum(1 for r in results if r)
-    print(f"--- 🏁 SESSION COMPLETE | TOTAL SUCCESS: {success} ---")
+    print(f"--- 🏁 SESSION COMPLETE | SUCCESS: {success} ---")
 
 if __name__ == "__main__":
     asyncio.run(main())
