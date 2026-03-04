@@ -1,26 +1,53 @@
-name: Runner
+name: Pulse Ghost Engine
+
 on:
   schedule:
-    - cron: '*/35 * * * *' # Runs every 35 minutes for stealth
-  workflow_dispatch:      # Allows you to click "Run" manually
+    # Runs every 16 minutes. 
+    # The '3' offset (3, 19, 35, 51) helps avoid the exact '00' minute 
+    # when anti-bot firewalls are most active.
+    - cron: '3/16 * * * *'
+  workflow_dispatch:
+    # Allows you to manually click "Run workflow" in the Actions tab.
 
 jobs:
-  build:
+  ghost-run:
+    name: Execute Pulse Logic
     runs-on: ubuntu-latest
+    
+    # Prevents multiple instances of the bot from running if one gets stuck
+    concurrency:
+      group: pulse-engine
+      cancel-in-progress: true
+
     steps:
-      - name: Checkout Code
+      - name: 🛰️ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+          # Automatically caches pip dependencies to make the bot faster
+          cache: 'pip'
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+      - name: 📦 Install Ghost Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Ensures the stealth library is always present
+          pip install curl_cffi 
 
-      - name: Execute Ghost Engine
+      - name: 👻 Execute Pulse Engine
         env:
+          # Pulls your MetaMask Address and API Key from GitHub Secrets
           FP_EMAIL: ${{ secrets.FP_EMAIL }}
           FP_API_KEY: ${{ secrets.FP_API_KEY }}
+          # Forces Python to output logs immediately so you can see 'Success' or 'Fail'
+          PYTHONUNBUFFERED: "1"
         run: python pulse.py
+
+      - name: 🛡️ Security Wipe
+        if: always()
+        run: |
+          # Cleans up temporary files to keep the environment stealthy
+          rm -rf __pycache__
