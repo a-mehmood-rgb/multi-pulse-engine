@@ -3,12 +3,12 @@ import os
 import random
 from curl_cffi import requests
 
-# CONFIG - Pulled from GitHub Secrets
+# CONFIG
 FP_EMAIL = os.getenv("FP_EMAIL")
 FP_API_KEY = os.getenv("FP_API_KEY")
 USER_PERSONAS = ["chrome", "safari", "edge"]
 
-# FULL WALLET SYNC: Matches your Dashboard exactly
+# FULL 2026 COIN LIST
 ALL_CURRENCIES = [
     "BTC", "ETH", "DOGE", "LTC", "BCH", "DASH", "DGB", "TRX", 
     "USDT", "FEY", "ZEC", "BNB", "SOL", "XRP", "POL", "ADA", 
@@ -16,72 +16,79 @@ ALL_CURRENCIES = [
 ]
 
 async def fetch_all_targets():
-    """Scans all 24 currencies to maximize target list."""
+    """Fetches sites in small batches to prevent API rate-limiting."""
     combined_list = []
-    print("--- STARTING FULL WALLET SYNC SCAN ---")
+    print("--- INITIATING STEALTH BATCH SCAN ---")
     
-    for coin in ALL_CURRENCIES:
-        try:
-            # Short timeout to keep the scan moving quickly
-            url = f"https://faucetpay.io/api/v1/faucetlist?api_key={FP_API_KEY}&currency={coin}"
-            resp = await asyncio.to_thread(requests.get, url, impersonate="chrome", timeout=7)
+    # Shuffle so we don't always hit the same coins first
+    random.shuffle(ALL_CURRENCIES)
+    
+    # Process in batches of 4 coins at a time
+    for i in range(0, len(ALL_CURRENCIES), 4):
+        batch = ALL_CURRENCIES[i:i+4]
+        print(f"Scanning Batch: {', '.join(batch)}...")
+        
+        for coin in batch:
+            try:
+                url = f"https://faucetpay.io/api/v1/faucetlist?api_key={FP_API_KEY}&currency={coin}"
+                resp = await asyncio.to_thread(requests.get, url, impersonate="chrome", timeout=10)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Only accept status 200 from the API body itself
+                    if data.get("status") == 200:
+                        faucets = data.get("faucets", [])
+                        active = [f["url"] for f in faucets if int(f.get("health", 0)) > 5]
+                        combined_list.extend(active)
+                elif resp.status_code == 429:
+                    print("Rate limit hit! Cooling down...")
+                    await asyncio.sleep(10)
+            except:
+                continue
+        
+        # Mandatory 5-second rest between batches
+        await asyncio.sleep(5)
             
-            if resp.status_code == 200:
-                data = resp.json()
-                faucets = data.get("faucets", [])
-                # Filter: Grab any site that has any funds left (health > 0)
-                active = [f["url"] for f in faucets if int(f.get("health", 0)) > 0]
-                if active:
-                    print(f"FOUND: {len(active)} active sites for {coin}")
-                    combined_list.extend(active)
-        except:
-            continue
-            
-    # Clean the list (remove duplicates)
     unique_targets = list(dict.fromkeys(combined_list))
-    print(f"TOTAL UNIQUE SITES DISCOVERED: {len(unique_targets)}")
-    return unique_targets
+    
+    # Fallback if API is totally blocked
+    if not unique_targets:
+        print("API returned zero results. Using Emergency Fallback.")
+        return ["https://free-tron.com/api/payout", "https://claimfreecoins.io/api/trx"]
+        
+    print(f"SCAN COMPLETE: Found {len(unique_targets)} sites.")
+    return unique_targets[:400] # Cap at 400 for safety
 
 async def claim_engine(url, semaphore):
-    """The stealth claiming logic."""
+    """Processes claims with randomized delays to avoid detection."""
     async with semaphore:
         try:
-            # Human jitter to avoid instant bot flags
-            await asyncio.sleep(random.uniform(0.5, 2))
+            # Random wait (1-4s) per site
+            await asyncio.sleep(random.uniform(1, 4))
             
             browser = random.choice(USER_PERSONAS)
             response = await asyncio.to_thread(
-                requests.post,
-                url,
+                requests.post, url,
                 data={'address': FP_EMAIL, 'api_key': FP_API_KEY},
-                impersonate=browser,
-                timeout=12
+                impersonate=browser, timeout=12
             )
             if response.status_code == 200:
-                print(f"SUCCESS: Claimed from {url}")
-                return True
+                print(f"SUCCESS: {url}")
         except:
             pass
-        return False
 
 async def main():
     if not FP_EMAIL or not FP_API_KEY:
-        print("ERROR: Missing FP_EMAIL or FP_API_KEY in GitHub Secrets.")
+        print("ERROR: Secrets missing.")
         return
 
     targets = await fetch_all_targets()
     
-    if not targets:
-        print("NOTICE: No sites found. The API might be rate-limiting. Waiting...")
-        return
-
-    # Process 40 sites at a time to handle the massive 2026 list
-    sem = asyncio.Semaphore(40)
-    print(f"LAUNCHING ENGINE: Processing {len(targets)} sites...")
-    
+    # Run the engine (Limit to 20 parallel tasks for maximum stealth)
+    sem = asyncio.Semaphore(20)
     tasks = [claim_engine(url, sem) for url in targets]
     await asyncio.gather(*tasks)
-    print("--- FULL ENGINE CYCLE COMPLETE ---")
+    print("--- ENGINE CYCLE COMPLETE ---")
 
 if __name__ == "__main__":
     asyncio.run(main())
