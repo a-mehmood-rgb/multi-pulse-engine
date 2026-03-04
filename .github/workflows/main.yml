@@ -9,7 +9,7 @@ jobs:
   pulse:
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false      # Keeps Windows running even if Ubuntu hits a temporary IP block
+      fail-fast: false      # Keeps Windows running even if Ubuntu fails
       matrix:
         os: [ubuntu-latest, windows-latest]
     
@@ -23,15 +23,15 @@ jobs:
           python-version: '3.11'
 
       - name: Install Stealth Tools
-        # This version checks for the file first. If it's missing, it installs directly!
+        # We use a universal Python command so Windows doesn't get confused by Linux syntax
         run: |
           python -m pip install --upgrade pip
-          pip install curl_cffi || echo "Direct install fallback"
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install curl_cffi
+          python -c "import os; os.system('pip install -r requirements.txt') if os.path.exists('requirements.txt') else print('No requirements file found, skipping...')"
 
       - name: Run Engine
         env:
           FP_EMAIL: ${{ secrets.FP_EMAIL }}
           FP_API_KEY: ${{ secrets.FP_API_KEY }}
-        # We use 'python -u' to see logs in REAL-TIME without waiting
+        # '-u' ensures you see the '✅ Success' logs immediately
         run: python -u pulse.py
