@@ -8,39 +8,54 @@ FP_API_KEY = os.getenv("FP_API_KEY")
 COOLDOWN_SITES = {}
 
 async def scrape_faucetpay_list():
-    print("🕵️  Bypassing Cloudflare... (March 2026 Stealth)")
+    print("🕵️  Initiating Hardware Simulation (Bypassing Turnstile 2026)")
     targets = []
     async with async_playwright() as p:
-        # Launch with 'headed' flags even if headless, to mimic real browser behavior
+        # Use Chromium with specific flags to hide automation
         browser = await p.chromium.launch(
-            headless=True, 
-            args=["--disable-blink-features=AutomationControlled"]
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-infobars"
+            ]
         )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0",
+            viewport={'width': 1366, 'height': 768}
         )
-        page = await context.new_page()
         
+        # KEY: This script deletes the "webdriver" property so Cloudflare can't see it
+        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        page = await context.new_page()
         try:
-            # 1. Navigate and WAIT for the 'Just a moment' challenge to pass
-            await page.goto("https://faucetpay.io/faucetlist/tron", wait_until="networkidle")
+            # 1. Random delay before navigating
+            await asyncio.sleep(random.uniform(2, 4))
+            await page.goto("https://faucetpay.io/faucetlist/tron", wait_until="domcontentloaded")
             
-            # 2. Add a 'Human' jitter
-            await asyncio.sleep(random.uniform(5, 8))
+            # 2. WAIT for the human check. 
+            # In 2026, you shouldn't just wait for the table; 
+            # you must wait for the "cf_clearance" cookie to appear.
+            print("⏳ Solving Turnstile...")
+            await asyncio.sleep(random.uniform(10, 15)) 
             
-            # 3. New 2026 Selector: FaucetPay often hides the table now. 
-            # We look for the 'Visit' buttons directly.
-            await page.wait_for_selector("a[href*='faucet/out/']", timeout=15000)
+            # 3. Use a different selector. Cloudflare often blocks 'a.btn-visit'
+            # We scrape the data directly from the row text if buttons are hidden.
+            rows = await page.locator("tr").all()
+            for row in rows[1:15]: # Skip header, grab top 14
+                text = await row.inner_text()
+                if "Visit" in text:
+                    # Logic to find the link within that specific row
+                    link_el = row.locator("a[href*='/out/']")
+                    if await link_el.count() > 0:
+                        href = await link_el.get_attribute("href")
+                        targets.append(href + "/api/payout")
             
-            links = await page.locator("a[href*='faucet/out/']").all()
-            for link in links[:12]:
-                url = await link.get_attribute("href")
-                # Convert the redirect link to a direct API target
-                if url: targets.append(url + "/api/payout")
-                
+            print(f"📡 Found {len(targets)} Fresh Targets via Stealth Scraper")
+            
         except Exception as e:
-            print(f"⚠️ Cloudflare still blocking. Using local cache.")
+            print(f"⚠️ Stealth Scraper failed. Error: {str(e)[:50]}")
         
         await browser.close()
     return targets if targets else ["https://free-tron.com/api/payout", "https://instant-tokens.com/api/payout"]
