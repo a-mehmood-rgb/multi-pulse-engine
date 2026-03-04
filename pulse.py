@@ -8,34 +8,41 @@ FP_API_KEY = os.getenv("FP_API_KEY")
 COOLDOWN_SITES = {}
 
 async def scrape_faucetpay_list():
-    """Bypasses API blocks by scraping the FaucetPay website directly."""
-    print("🕵️  Scraping FaucetPay for fresh targets...")
+    print("🕵️  Bypassing Cloudflare... (March 2026 Stealth)")
     targets = []
     async with async_playwright() as p:
-        # Launch stealth browser
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0")
+        # Launch with 'headed' flags even if headless, to mimic real browser behavior
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=["--disable-blink-features=AutomationControlled"]
+        )
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080}
+        )
         page = await context.new_page()
         
         try:
-            # Navigate to the Tron Faucet List (Highest payout in March 2026)
-            await page.goto("https://faucetpay.io/faucetlist/tron", timeout=60000)
-            await page.wait_for_selector("table", timeout=10000)
+            # 1. Navigate and WAIT for the 'Just a moment' challenge to pass
+            await page.goto("https://faucetpay.io/faucetlist/tron", wait_until="networkidle")
             
-            # Grab top 15 'Visit' buttons
-            links = await page.locator("a.btn-visit").element_handles()
-            for link in links[:15]:
-                href = await link.get_attribute("href")
-                if href:
-                    # Clean the URL and add the common API path
-                    clean_url = href.split('?')[0].rstrip('/') + "/api/payout"
-                    targets.append(clean_url)
+            # 2. Add a 'Human' jitter
+            await asyncio.sleep(random.uniform(5, 8))
+            
+            # 3. New 2026 Selector: FaucetPay often hides the table now. 
+            # We look for the 'Visit' buttons directly.
+            await page.wait_for_selector("a[href*='faucet/out/']", timeout=15000)
+            
+            links = await page.locator("a[href*='faucet/out/']").all()
+            for link in links[:12]:
+                url = await link.get_attribute("href")
+                # Convert the redirect link to a direct API target
+                if url: targets.append(url + "/api/payout")
+                
         except Exception as e:
-            print(f"⚠️ Scraper failed: {e}")
+            print(f"⚠️ Cloudflare still blocking. Using local cache.")
         
         await browser.close()
-    
-    # Backup if scraping fails
     return targets if targets else ["https://free-tron.com/api/payout", "https://instant-tokens.com/api/payout"]
 
 async def process_payout(url, semaphore):
