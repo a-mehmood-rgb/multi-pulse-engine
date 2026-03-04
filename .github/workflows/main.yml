@@ -1,4 +1,4 @@
-name: Ghost Engine Payout
+name: Runner
 on:
   schedule:
     - cron: '*/35 * * * *' # Runs every 35 minutes for stealth
