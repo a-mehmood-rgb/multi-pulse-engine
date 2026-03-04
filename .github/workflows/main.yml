@@ -2,8 +2,8 @@ name: Pulse Ghost Engine
 
 on:
   schedule:
-    # Runs every 16 minutes. 
-    # The '3' offset (3, 19, 35, 51) helps avoid the exact '00' minute 
+    # Runs every 16 minutes.
+    # The '3' offset (3, 19, 35, 51) helps avoid the exact '00' minute
     # when anti-bot firewalls are most active.
     - cron: '3/16 * * * *'
   workflow_dispatch:
@@ -20,24 +20,27 @@ jobs:
       cancel-in-progress: true
 
     steps:
-      - name: 🛰️ Checkout Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Setup Python 3.11
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           # Automatically caches pip dependencies to make the bot faster
           cache: 'pip'
 
-      - name: 📦 Install Ghost Dependencies
+      - name: Install Ghost Dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install curl_cffi playwright
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Ensures the stealth library is always present
-          pip install curl_cffi 
 
-      - name: 👻 Execute Pulse Engine
+      - name: Install Playwright Browsers
+        # Required for the scraper logic to work in a clean environment
+        run: python -m playwright install chromium --with-deps
+
+      - name: Execute Pulse Engine
         env:
           # Pulls your MetaMask Address and API Key from GitHub Secrets
           FP_EMAIL: ${{ secrets.FP_EMAIL }}
@@ -46,8 +49,9 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python pulse.py
 
-      - name: 🛡️ Security Wipe
+      - name: Security Wipe
         if: always()
         run: |
           # Cleans up temporary files to keep the environment stealthy
           rm -rf __pycache__
+          rm -rf ~/.cache/ms-playwright
