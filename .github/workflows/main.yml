@@ -1,0 +1,26 @@
+name: Multi-Grid-Pulse-2026
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # Runs every 15 minutes
+  workflow_dispatch:       # The "Magic Button" for manual runs
+
+jobs:
+  pulse:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Stealth Tools
+        run: pip install -r requirements.txt
+      - name: Run Engine
+        env:
+          FP_EMAIL: ${{ secrets.FP_EMAIL }}
+          FP_API_KEY: ${{ secrets.FP_API_KEY }}
+        run: python pulse.py
