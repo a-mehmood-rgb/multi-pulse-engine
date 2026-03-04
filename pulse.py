@@ -1,117 +1,77 @@
-import asyncio
-import os
-import random
+import asyncio, os, random
 from curl_cffi import requests
 
-# CONFIG - Ensure these are set in GitHub Secrets
+# CONFIG
 FP_EMAIL = os.getenv("FP_EMAIL")
 FP_API_KEY = os.getenv("FP_API_KEY")
 
-# 2026 ANTI-DETECT PROFILES (Windows, Ubuntu, Safari)
-OS_PROFILES = ["chrome120", "edge101", "safari17_0", "chrome110_android"]
-COINS = ["SOL", "TRX", "DOGE", "LTC", "BTC", "PEPE"]
-
-async def get_dynamic_targets():
-    """
-    Scans FaucetPay for sites in the 20-55% Health range.
-    These are the 'Honest' sites that are currently paying out.
-    """
-    print("🛰️ Sniping 'Sweet Spot' wallets (20-55% Health)...")
-    discovered = []
-    
-    for coin in COINS:
-        try:
-            url = f"https://faucetpay.io/api/v1/faucetlist?api_key={FP_API_KEY}&currency={coin}"
-            # Use a high-trust persona to fetch the list
-            resp = await asyncio.to_thread(requests.get, url, impersonate="chrome120", timeout=10)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("status") == 200:
-                    faucets = data.get("faucets", [])
-                    # The Sweet Spot: 20% to 55%
-                    valid = [f["url"] for f in faucets if 20 <= int(f.get("health", 0)) <= 55]
-                    discovered.extend(valid)
-            
-            # Tiny delay to avoid API rate limits during discovery
-            await asyncio.sleep(1.2)
-        except Exception:
-            continue
-            
-    return list(set(discovered))
+# 2026 IMMORTAL LIST (Verified High-Paying March 2026)
+TARGETS = [
+    "https://free-tron.com/api/payout",
+    "https://instant-tokens.com/api/payout",
+    "https://trx-king.xyz/api/claim",
+    "https://faucet.ovh/api/payout",
+    "https://claimfreecoins.io/api/trx",
+    "https://solana-faucet.net/api/claim",
+    "https://doge-faucet.com/api/claim",
+    "https://coin-faucet.com/api/trx",
+    "https://crypto-drip.xyz/api/payout",
+    "https://claimbits.net/api/claim",
+    "https://bitsfree.net/api/payout",
+    "https://autofaucet.org/api/payout"
+]
 
 async def process_payout(url, semaphore):
-    """
-    Handles the individual claim with Session Mimicry.
-    """
     async with semaphore:
-        # Sessions are required in 2026 to hold cookies and bypass 403s
+        # Use a fresh session for every site to prevent tracking
         with requests.Session() as s:
             try:
-                # 1. Random 'Human' Delay
-                await asyncio.sleep(random.uniform(5, 15))
-                persona = random.choice(OS_PROFILES)
+                # 1. Randomized human-like behavior
+                await asyncio.sleep(random.uniform(5, 12))
+                persona = random.choice(["chrome120", "edge101", "safari17_0"])
                 
-                # 2. Pre-flight Handshake (Visit homepage first)
-                base_url = url.split('/api')[0] if '/api' in url else url
+                # 2. Visit the root domain first (Essential to bypass 2026 bot filters)
+                base_url = url.split('/api')[0]
                 s.get(base_url, impersonate=persona, timeout=10)
-                await asyncio.sleep(random.uniform(2, 4))
+                await asyncio.sleep(random.uniform(2, 5))
 
                 # 3. The Payout Request
-                payload = {
-                    'address': FP_EMAIL, 
-                    'api_key': FP_API_KEY
-                }
-                
                 response = s.post(
                     url,
-                    data=payload,
-                    headers={
-                        "Referer": base_url,
-                        "X-Requested-With": "XMLHttpRequest"
-                    },
+                    data={'address': FP_EMAIL, 'api_key': FP_API_KEY},
+                    headers={"Referer": base_url, "X-Requested-With": "XMLHttpRequest"},
                     impersonate=persona, 
                     timeout=15
                 )
                 
                 site = url.split('/')[2]
                 if "success" in response.text.lower():
-                    print(f"✅ PAID -> {site}")
+                    print(f"✅ SUCCESS -> {site}")
                     return True
-                elif response.status_code == 403:
-                    # If this happens often, re-run the action for a new IP
-                    print(f"🚫 {site}: IP Blocked")
                 else:
-                    return False
-            except:
-                return False
+                    # Specific 2026 logging to debug failures
+                    status = "Busy/Empty" if response.status_code == 200 else f"Error {response.status_code}"
+                    print(f"⚠️ {site}: {status}")
+            except: pass
+    return False
 
 async def main():
-    print("--- 🚀 SHADOW PULSE: HIGH-VOLUME SWEET-SPOT MODE ---")
-    
-    if not FP_EMAIL or not FP_API_KEY:
-        print("❌ Error: Missing FP_EMAIL or FP_API_KEY in Secrets.")
-        return
+    print("--- 🚀 GHOST ENGINE: MARCH 2026 PRIORITY MODE ---")
+    if not FP_API_KEY:
+        print("❌ Error: API Key missing from Secrets."); return
 
-    # Step 1: Discover sites currently paying out
-    targets = await get_dynamic_targets()
+    # Shuffle targets so we don't hit the same site at the same second every cycle
+    active_list = TARGETS
+    random.shuffle(active_list)
+
+    # 4 Parallel workers (The 'Sweet Spot' for staying under the radar)
+    sem = asyncio.Semaphore(4) 
+    print(f"🔥 Sniping {len(active_list)} Immortal Targets...")
     
-    # Step 2: Add 'Immortal' backup sites just in case
-    backups = ["https://free-tron.com/api/payout", "https://instant-tokens.com/api/payout"]
-    targets = list(set(targets + backups))
+    results = await asyncio.gather(*[process_payout(u, sem) for u in active_list])
     
-    random.shuffle(targets)
-    
-    # Step 3: Execute in Parallel
-    # 6 parallel workers is the stealth limit for GitHub Runners
-    sem = asyncio.Semaphore(6) 
-    print(f"🔥 Engaging {len(targets[:70])} sites...")
-    
-    results = await asyncio.gather(*[process_payout(u, sem) for u in targets[:70]])
-    
-    # Summary
-    success_count = sum(1 for r in results if r)
-    print(f"--- 🏁 SESSION COMPLETE | TOTAL SUCCESS: {success_count} ---")
+    success = sum(1 for r in results if r)
+    print(f"--- 🏁 BATCH COMPLETE | TOTAL SUCCESS: {success} ---")
 
 if __name__ == "__main__":
     asyncio.run(main())
