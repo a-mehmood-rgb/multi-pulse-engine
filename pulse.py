@@ -1,75 +1,52 @@
-import asyncio, os, time, random
+import asyncio, os, time
 from curl_cffi import requests
-from termcolor import colored
 
-# CONFIG
-MAIL = os.getenv("MAIL")
-PASSWORD = os.getenv("PASSWORD")
-BASE_URL = "https://faucetearner.org"
+# CONFIG: Use your FaucetPay API Key from your dashboard
+API_KEY = os.getenv("FP_API_KEY") 
+WALLET_ADDR = os.getenv("WALLET_ADDR")
 
-def log(message, color="white", on_color=None):
-    t = time.strftime("%H:%M:%S")
-    print(f"[{t}] {colored(message, color, on_color)}")
+async def get_active_faucets():
+    """Fetches the latest list of high-health faucets from FaucetPay."""
+    url = f"https://faucetpay.io/api/v1/listfaucets?api_key={API_KEY}"
+    try:
+        async with requests.AsyncSession() as s:
+            r = await s.get(url)
+            data = r.json()
+            if data.get("status") == 200:
+                # Filter for sites with > 80% health and 'Normal' payout
+                return [f['url'] for f in data['faucets'] if int(f['health']) > 80]
+    except:
+        return []
 
-async def ghost_pulse():
-    log("---  GHOST ENGINE v7.0: PULSE-SYNC ---", "magenta")
-    
-    # Use AsyncSession to maintain cookies (login state)
-    async with requests.AsyncSession(impersonate="chrome120") as s:
-        # 1. AUTHENTICATION
-        log("Logging in...", "yellow")
-        login_data = {'email': MAIL, 'password': PASSWORD}
-        # Emulating the AJAX login used by faucetearner
-        r = await s.post(f"{BASE_URL}/api.php?act=login", data=login_data)
-        
-        if "success" not in r.text.lower() and r.status_code != 200:
-            log("Login failed! check credentials.", "red")
-            return
+async def claim_payout(faucet_url):
+    """Attempts a direct API claim without login/captcha."""
+    try:
+        async with requests.AsyncSession(impersonate="chrome120") as s:
+            # We target the common 'api/claim' endpoint many sites use
+            target = f"{faucet_url.rstrip('/')}/api/claim"
+            payload = {'address': WALLET_ADDR, 'currency': 'TRX'}
+            
+            # Direct POST to bypass frontend links
+            res = await s.post(target, data=payload, timeout=10)
+            if "success" in res.text.lower():
+                print(f"Success: {faucet_url}")
+    except:
+        pass
 
-        log("Logged in successfully!", "green")
+async def main():
+    print("--- 🌫️ GHOST AUTO-SCOUT: DYNAMIC API MODE ---")
+    while True:
+        # 1. Dynamically get all sites (Not fixed!)
+        faucet_list = await get_active_faucets()
+        print(f"Discovered {len(faucet_list)} active API faucets.")
 
-        # 2. MAIN PULSE LOOP
-        while True:
-            try:
-                # Sync with the server's 'second' counter
-                # We fetch the faucet page to get the current timer state
-                faucet_page = await s.get(f"{BASE_URL}/faucet.php")
-                
-                # Optimized: Direct API Request during the 55s-60s window
-                # The Selenium script waits for '55'. We'll fire right at the sweet spot.
-                log("Waiting for pulse window (55s mark)...", "cyan")
-                
-                while True:
-                    current_sec = time.localtime().tm_sec
-                    if current_sec >= 55:
-                        break
-                    await asyncio.sleep(0.5) # High-precision polling
+        # 2. Pulse through the list
+        for url in faucet_list:
+            await claim_payout(url)
+            await asyncio.sleep(60) # Stagger to avoid IP bans
 
-                # 3. TRIGGER PAYOUT (The 'apireq' equivalent)
-                log("Target in sight. Firing API request...", "white", "on_blue")
-                
-                # Faucetearner uses a specific API endpoint for the 'apireq()' function
-                payout_req = await s.post(
-                    f"{BASE_URL}/api.php?act=faucet", 
-                    headers={"X-Requested-With": "XMLHttpRequest"}
-                )
-                
-                if payout_req.status_code == 200:
-                    res_data = payout_req.json()
-                    reward = res_data.get("message", "Unknown Amount")
-                    log(f" CLAIM SUCCESS: {reward}", "white", "on_green")
-                else:
-                    log(f"Pulse missed or rate-limited. Retrying next cycle.", "red")
-
-                # Wait for the next minute cycle
-                await asyncio.sleep(60 - time.localtime().tm_sec + 1)
-                
-            except Exception as e:
-                log(f" Error in pulse: {e}", "red")
-                await asyncio.sleep(5)
+        # 3. Rest before next global scan
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(ghost_pulse())
-    except KeyboardInterrupt:
-        log("Ghost Engine stopped by user.", "yellow")
+    asyncio.run(main())
