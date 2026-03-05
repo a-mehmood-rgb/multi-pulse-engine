@@ -1,63 +1,42 @@
-import asyncio, os, time, random
-from curl_cffi import requests
+import os, time, random
+from seleniumbase import Driver
 
-# CONFIG: Set these in GitHub Secrets
+# CONFIG
 WALLET = os.getenv("WALLET_ADDR")
+# Note: You can't just 'Ping' these anymore; you must 'Visit' them.
+SITES = ["https://faucetearner.org", "https://instant-tron.com"]
 
-# 2026 High-Trust Targets (Optimized for $3/day scale)
-SITES = [
-    {"url": "https://faucetearner.org", "api": "/api.php?act=faucet"},
-    {"url": "https://instant-tron.com", "api": "/api/claim"},
-    {"url": "https://trx-king.xyz", "api": "/api/payout"},
-    {"url": "https://free-tron.io", "api": "/api/claim"},
-    {"url": "https://tron-express.io", "api": "/api/payout"}
-]
+def ghost_pulse():
+    # Launch a stealth driver that Cloudflare cannot see
+    driver = Driver(browser="chrome", uc=True, headless=True)
+    
+    try:
+        for url in SITES:
+            print(f"--- Visiting {url} ---")
+            driver.get(url)
+            time.sleep(random.uniform(5, 8)) # Wait for Cloudflare to 'Green Light' you
 
-async def ghost_claim(site, semaphore):
-    domain = site['url'].split('/')[2]
-    async with semaphore:
-        # Create a session to handle cookies automatically
-        async with requests.AsyncSession(impersonate="chrome120") as s:
+            # Logic for FaucetEarner (Requires login now)
+            if "faucetearner" in url:
+                # You must manually login ONCE on your PC and export cookies, 
+                # OR use the login secrets here:
+                # driver.type("#email", os.getenv("MAIL"))
+                # driver.type("#password", os.getenv("PASSWORD"))
+                # driver.click("#login_btn")
+                pass
+
+            # Logic for Direct Wallet Faucets
             try:
-                # 1. 'Visit' the home page to get a Session ID (Bypasses basic bot blocks)
-                await s.get(site['url'], timeout=15)
-                await asyncio.sleep(random.uniform(3, 6))
+                # Find the input box and type the wallet
+                driver.type("input[name='address']", WALLET)
+                time.sleep(2)
+                driver.click("button:contains('Claim')")
+                print(f"✅ Claim Attempted on {url}")
+            except:
+                print(f"❌ Could not find claim button on {url}")
 
-                # 2. Prepare the payout request with real headers
-                headers = {
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Referer": site['url'],
-                    "Origin": site['url']
-                }
-                payload = {'address': WALLET, 'currency': 'TRX'}
-                
-                # 3. Fire the actual claim
-                r = await s.post(f"{site['url']}{site['api']}", data=payload, headers=headers, timeout=15)
-
-                if "success" in r.text.lower() or "earned" in r.text.lower():
-                    print(f"✅ [{time.strftime('%H:%M')}] {domain}: Success!")
-                    return True
-                else:
-                    # If it fails, we show the first 40 characters of the error
-                    print(f"❌ [{time.strftime('%H:%M')}] {domain}: {r.text[:40].strip()}")
-            except Exception:
-                print(f"⚠️ [{time.strftime('%H:%M')}] {domain}: Connection Refused")
-    return False
-
-async def main():
-    if not WALLET:
-        print("CRITICAL: WALLET_ADDR secret is missing!")
-        return
-
-    print(f"--- 🚀 GHOST ENGINE v12.1 | TARGET: {WALLET[:8]} ---")
-    sem = asyncio.Semaphore(2) # Keep CPU at 0% for GitHub safety
-    
-    # Run one full cycle of all sites
-    tasks = [ghost_claim(s, sem) for s in SITES]
-    results = await asyncio.gather(*tasks)
-    
-    success_count = sum(1 for r in results if r)
-    print(f"--- 🏁 CYCLE FINISHED | PAYOUTS: {success_count} ---")
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    ghost_pulse()
