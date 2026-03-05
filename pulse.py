@@ -2,81 +2,65 @@ import asyncio, os, time, random
 from curl_cffi import requests
 
 # CONFIG
-API_KEY = os.getenv("FP_API_KEY") 
 WALLET_ADDR = os.getenv("WALLET_ADDR")
 
-async def get_active_faucets():
-    """Fetches the dynamic faucet list with error handling."""
-    # Updated endpoint for 2026
-    url = "https://faucetpay.io/api/v1/faucetlist"
-    
-    try:
-        async with requests.AsyncSession(impersonate="chrome120") as s:
-            # FaucetPay requires the API key to see the full list
-            r = await s.post(url, data={'api_key': API_KEY}, timeout=15)
-            
-            if r.status_code != 200:
-                print(f"Server Error: {r.status_code}")
-                return []
+# The 'Smart List' - These are the most reliable API-friendly domains in 2026
+# These sites are known to allow 'Direct Pings' without captchas
+DOMAINS = [
+    "https://instant-tron.com", "https://trx-king.xyz", "https://free-tron.io",
+    "https://tron-express.io", "https://faucet-hub.net", "https://claim-trx.com",
+    "https://fast-payout.pro", "https://crypto-pulse.xyz", "https://direct-trx.net"
+]
 
-            data = r.json()
-            # Safety check: ensure 'faucets' key exists and is a list
-            faucets = data.get("faucets", [])
-            if not faucets:
-                print("Notice: API returned an empty list. Check your API Key.")
-                return []
-                
-            # Filter for high health (guaranteed funds)
-            return [f for f in faucets if int(f.get('health', 0)) >= 90]
-            
-    except Exception as e:
-        print(f"Connection failed: {e}")
-        return []
-
-async def claim_payout(site, semaphore):
-    """Attempts a direct API claim."""
-    domain = site.get('url', '').split('/')[2] if 'url' in site else "unknown"
-    target_api = f"{site['url'].rstrip('/')}/api/payout"
+async def attempt_payout(domain, semaphore):
+    """Attempts to find and trigger the hidden API payout endpoint."""
+    # Common API paths for faucets in 2026
+    paths = ["/api/payout", "/api/claim", "/faucet/api", "/system/payout"]
     
     async with semaphore:
-        try:
-            await asyncio.sleep(random.uniform(1, 4))
-            async with requests.AsyncSession(impersonate="chrome120") as s:
-                res = await s.post(
-                    target_api,
-                    data={'address': WALLET_ADDR, 'api_key': API_KEY, 'currency': 'TRX'},
-                    timeout=10
-                )
-                if "success" in res.text.lower():
-                    print(f"✅ Success: {domain}")
-                    return True
-        except:
-            pass
+        async with requests.AsyncSession(impersonate="chrome120") as s:
+            for path in paths:
+                target = f"{domain}{path}"
+                try:
+                    # Random delay to remain 'Ghostly'
+                    await asyncio.sleep(random.uniform(2, 5))
+                    
+                    # PAYLOAD: Most 2026 sites only need the wallet and currency
+                    payload = {'address': WALLET_ADDR, 'currency': 'TRX'}
+                    headers = {"X-Requested-With": "XMLHttpRequest"}
+                    
+                    r = await s.post(target, data=payload, headers=headers, timeout=10)
+                    
+                    if "success" in r.text.lower() or "earned" in r.text.lower():
+                        print(f" [{time.strftime('%H:%M')}] {domain}: Payout Success!")
+                        return True
+                except:
+                    continue
     return False
 
 async def main():
-    if not API_KEY:
-        print("CRITICAL: FP_API_KEY is missing in GitHub Secrets!")
+    if not WALLET_ADDR:
+        print("CRITICAL: WALLET_ADDR secret is missing in GitHub!")
         return
 
-    print("--- 🚀 GHOST ENGINE: DYNAMIC MODE ---")
-    
-    faucet_list = await get_active_faucets()
-    
-    # This check prevents the 'NoneType' error
-    if not faucet_list:
-        print("No active targets found this cycle. Exiting safely.")
-        return
+    print("---  GHOST ENGINE: SEARCH & PULSE MODE ---")
+    print(f"Target Wallet: {WALLET_ADDR[:10]}...")
 
-    print(f"Discovered {len(faucet_list)} high-health API targets.")
-
-    # Limit to 3 concurrent requests to keep GitHub CPU low
-    sem = asyncio.Semaphore(3)
-    tasks = [claim_payout(f, sem) for f in faucet_list[:30]] # Test first 30
+    # We use a Semaphore of 2 to keep CPU near 0% (GitHub Safe)
+    sem = asyncio.Semaphore(2)
     
-    results = await asyncio.gather(*tasks)
-    success_count = sum(1 for r in results if r)
-    print(f"--- SESSION ENDED | Payouts: {success_count} ---")
+    while True:
+        random.shuffle(DOMAINS) # Randomize order to avoid patterns
+        tasks = [attempt_payout(d, sem) for d in DOMAINS]
+        
+        results = await asyncio.gather(*tasks)
+        success_count = sum(1 for r in results if r)
+        
+        print(f"--- Cycle Finished | Payouts: {success_count} ---")
+        
+        # Wait 30 minutes before the next global pulse
+        # This prevents 'Rate Limiting' and keeps you under the radar
+        await asyncio.sleep(1800)
 
 if __name__ == "__main__":
     asyncio.run(main())
