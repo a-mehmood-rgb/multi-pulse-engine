@@ -1,15 +1,20 @@
-name: Ghost Engine Pulse
+name: Ghoskk
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Runs every 30 mins
-  workflow_dispatch:      # Allows manual trigger
+    # Runs every 2 hours at a random minute to avoid detection
+    - cron: '45 */2 * * *' 
+  workflow_dispatch: # Allows you to run it manually for testing
 
 jobs:
-  build:
+  auto-payout:
     runs-on: ubuntu-latest
+    
+    # Setting a hard limit of 30 minutes to stay within "Free Tier" safety
+    timeout-minutes: 30 
+
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -17,14 +22,13 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          pip install curl_cffi termcolor
+          pip install -r requirements.txt
 
-      - name: Run Pulse Script
+      - name: Execute Dynamic Pulse
         env:
-          MAIL: ${{ secrets.MAIL }}
-          PASSWORD: ${{ secrets.PASSWORD }}
+          # These must be set in your GitHub Repo Settings > Secrets
           FP_API_KEY: ${{ secrets.FP_API_KEY }}
-          FP_EMAIL: ${{ secrets.FP_EMAIL }}
+          WALLET_ADDR: ${{ secrets.WALLET_ADDR }}
         run: python pulse.py
