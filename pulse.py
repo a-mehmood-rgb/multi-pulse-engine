@@ -1,62 +1,66 @@
 import asyncio, os, time, random
 from curl_cffi import requests
 
-# CONFIG - Pulled from your GitHub Secrets
 WALLET = os.getenv("WALLET_ADDR")
 
-# The 'Smart List' - Top verified API-friendly domains for 2026
-# These are known to support direct API pings without captchas
+# Updated 2026 High-Yield Targets
 SITES = [
-    "https://instant-tron.com", "https://trx-king.xyz", "https://free-tron.io",
-    "https://tron-express.io", "https://faucet-hub.net", "https://claim-trx.com",
-    "https://fast-payout.pro", "https://crypto-pulse.xyz", "https://direct-trx.net",
-    "https://faucetearner.org" # Added your preferred site back in
+    {"url": "https://faucetearner.org", "api": "/api.php?act=faucet"},
+    {"url": "https://instant-tron.com", "api": "/api/claim"},
+    {"url": "https://trx-king.xyz", "api": "/api/payout"},
+    {"url": "https://free-tron.io", "api": "/api/claim"}
 ]
 
-async def scan_and_pulse(domain, semaphore):
-    """Targets common API paths used by faucet scripts."""
-    # These are the 3 most common 'payout doors' in 2026
-    paths = ["/api/payout", "/api/claim", "/api.php?act=faucet"]
-    
+async def ghost_claim(site, semaphore):
+    domain = site['url'].split('/')[2]
     async with semaphore:
+        # 1. Start a Session to handle Cookies automatically
         async with requests.AsyncSession(impersonate="chrome120") as s:
-            for path in paths:
-                target = f"{domain.rstrip('/')}{path}"
-                try:
-                    # Mimic human delay
-                    await asyncio.sleep(random.uniform(3, 7))
-                    
-                    # We send the request. No password, just the wallet and a fake browser header.
-                    headers = {"X-Requested-With": "XMLHttpRequest"}
-                    payload = {'address': WALLET, 'currency': 'TRX'}
-                    
-                    r = await s.post(target, data=payload, headers=headers, timeout=10)
-                    
-                    if "success" in r.text.lower() or "earned" in r.text.lower():
-                        print(f"[{time.strftime('%H:%M')}] {domain}: Claim Successful")
-                        return True
-                except:
-                    continue
+            try:
+                # 2. Visit Home Page first (Crucial to get the Session Cookie)
+                await s.get(site['url'], timeout=15)
+                await asyncio.sleep(random.uniform(2, 4))
+
+                # 3. Fire the Actual Payout
+                headers = {
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": site['url']
+                }
+                payload = {'address': WALLET, 'currency': 'TRX'}
+                
+                response = await s.post(
+                    f"{site['url']}{site['api']}", 
+                    data=payload, 
+                    headers=headers, 
+                    timeout=15
+                )
+
+                if "success" in response.text.lower() or "earned" in response.text.lower():
+                    print(f"✅ [{time.strftime('%H:%M')}] {domain}: Success!")
+                    return True
+                else:
+                    # Log the reason for failure (e.g., "Wait 5 minutes")
+                    reason = response.text[:30].replace('\n', '')
+                    print(f"❌ [{time.strftime('%H:%M')}] {domain}: {reason}")
+            except Exception as e:
+                print(f"⚠️ [{time.strftime('%H:%M')}] {domain}: Connection Error")
     return False
 
 async def main():
     if not WALLET:
-        print("CRITICAL: WALLET_ADDR secret is missing in GitHub!")
+        print("MISSING WALLET_ADDR IN SECRETS")
         return
 
-    print("--- 🚀 GHOST SCANNER: PULSE MODE ---")
-    print(f"Targeting: {WALLET[:8]}...")
-
-    # Limit to 2 concurrent requests to keep GitHub CPU at 0%
+    print(f"--- 🚀 GHOST ENGINE v12.0 | TARGET: {WALLET[:8]} ---")
     sem = asyncio.Semaphore(2)
     
-    # Run the cycle
-    random.shuffle(SITES)
-    tasks = [scan_and_pulse(site, sem) for site in SITES]
-    results = await asyncio.gather(*tasks)
-    
-    success_count = sum(1 for r in results if r)
-    print(f"--- 🏁 CYCLE FINISHED | SUCCESSES: {success_count} ---")
+    while True:
+        tasks = [ghost_claim(s, sem) for s in SITES]
+        await asyncio.gather(*tasks)
+        
+        # 15-minute rest to avoid 'Bot' detection
+        print("Cycle finished. Resting 15m...")
+        await asyncio.sleep(900)
 
 if __name__ == "__main__":
     asyncio.run(main())
