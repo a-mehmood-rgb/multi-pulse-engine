@@ -1,48 +1,75 @@
-import asyncio, os, random
+import asyncio, os, time, random
 from curl_cffi import requests
+from termcolor import colored
 
 # CONFIG
-FP_EMAIL = os.getenv("FP_EMAIL")
-FP_API_KEY = os.getenv("FP_API_KEY")
+MAIL = os.getenv("MAIL")
+PASSWORD = os.getenv("PASSWORD")
+BASE_URL = "https://faucetearner.org"
 
-# Verified March 2026 API-only targets (No login required)
-API_TARGETS = [
-    "https://free-tron.com/api/payout",
-    "https://instant-tokens.com/api/payout",
-    "https://trx-king.xyz/api/payout",
-    "https://faucet-generator.com/api/payout",
-    "https://claimclick.net/api/payout"
-]
+def log(message, color="white", on_color=None):
+    t = time.strftime("%H:%M:%S")
+    print(f"[{t}] {colored(message, color, on_color)}")
 
-async def snipe_target(url, semaphore):
-    domain = url.split('/')[2]
-    async with semaphore:
-        try:
-            # Human-like delay to avoid IP rate-limiting
-            await asyncio.sleep(random.uniform(5, 12))
-            
-            with requests.Session() as s:
-                # Direct API Snipe
-                response = s.post(
-                    url,
-                    data={'address': FP_EMAIL, 'api_key': FP_API_KEY},
-                    impersonate="chrome120",
-                    timeout=15
+async def ghost_pulse():
+    log("---  GHOST ENGINE v7.0: PULSE-SYNC ---", "magenta")
+    
+    # Use AsyncSession to maintain cookies (login state)
+    async with requests.AsyncSession(impersonate="chrome120") as s:
+        # 1. AUTHENTICATION
+        log("Logging in...", "yellow")
+        login_data = {'email': MAIL, 'password': PASSWORD}
+        # Emulating the AJAX login used by faucetearner
+        r = await s.post(f"{BASE_URL}/api.php?act=login", data=login_data)
+        
+        if "success" not in r.text.lower() and r.status_code != 200:
+            log("Login failed! check credentials.", "red")
+            return
+
+        log("Logged in successfully!", "green")
+
+        # 2. MAIN PULSE LOOP
+        while True:
+            try:
+                # Sync with the server's 'second' counter
+                # We fetch the faucet page to get the current timer state
+                faucet_page = await s.get(f"{BASE_URL}/faucet.php")
+                
+                # Optimized: Direct API Request during the 55s-60s window
+                # The Selenium script waits for '55'. We'll fire right at the sweet spot.
+                log("Waiting for pulse window (55s mark)...", "cyan")
+                
+                while True:
+                    current_sec = time.localtime().tm_sec
+                    if current_sec >= 55:
+                        break
+                    await asyncio.sleep(0.5) # High-precision polling
+
+                # 3. TRIGGER PAYOUT (The 'apireq' equivalent)
+                log("Target in sight. Firing API request...", "white", "on_blue")
+                
+                # Faucetearner uses a specific API endpoint for the 'apireq()' function
+                payout_req = await s.post(
+                    f"{BASE_URL}/api.php?act=faucet", 
+                    headers={"X-Requested-With": "XMLHttpRequest"}
                 )
                 
-                if "success" in response.text.lower():
-                    print(f"✅ API SUCCESS -> {domain}")
-                    return True
+                if payout_req.status_code == 200:
+                    res_data = payout_req.json()
+                    reward = res_data.get("message", "Unknown Amount")
+                    log(f" CLAIM SUCCESS: {reward}", "white", "on_green")
                 else:
-                    print(f"❌ {domain}: Skipped (Login/Captcha Required)")
-        except: pass
-    return False
+                    log(f"Pulse missed or rate-limited. Retrying next cycle.", "red")
 
-async def main():
-    print("--- 🚀 GHOST ENGINE v3.5: PURE API MODE ---")
-    sem = asyncio.Semaphore(2) 
-    results = await asyncio.gather(*[snipe_target(u, sem) for u in API_TARGETS])
-    print(f"--- 🏁 SESSION COMPLETE | SUCCESS: {sum(1 for r in results if r)} ---")
+                # Wait for the next minute cycle
+                await asyncio.sleep(60 - time.localtime().tm_sec + 1)
+                
+            except Exception as e:
+                log(f" Error in pulse: {e}", "red")
+                await asyncio.sleep(5)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(ghost_pulse())
+    except KeyboardInterrupt:
+        log("Ghost Engine stopped by user.", "yellow")
